@@ -95,8 +95,26 @@ class IPFSInstaller {
             switch (this.platform) {
                 case 'win32':
                     console.log('Installing IPFS using winget...');
-                    await execAsync('winget install IPFS.IPFS');
-                    return true;
+                    try {
+                        // First check if winget is available
+                        await execAsync('winget --version', { timeout: 5000 });
+                        
+                        // Set a longer timeout for the actual installation
+                        const result = await execAsync('winget install IPFS.IPFS --accept-source-agreements --accept-package-agreements', 
+                            { timeout: 300000 }); // 5 minutes timeout
+                        
+                        console.log('Winget installation output:', result.stdout);
+                        return true;
+                    } catch (wingetError) {
+                        if (wingetError.message.includes('not recognized')) {
+                            console.log('Winget is not available on this system');
+                        } else if (wingetError.message.includes('timed out')) {
+                            console.log('Winget installation timed out after 5 minutes');
+                        } else {
+                            console.log('Winget installation failed:', wingetError.message);
+                        }
+                        return false;
+                    }
                 case 'darwin':
                     console.log('Installing IPFS using Homebrew...');
                     await execAsync('brew install ipfs');
