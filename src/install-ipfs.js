@@ -64,8 +64,58 @@ class IPFSInstaller {
         }
     }
 
-    getDownloadUrl() {
-        const version = 'v0.21.0';
+    async getLatestVersion() {
+        try {
+            console.log('Fetching latest IPFS version...');
+            return new Promise((resolve, reject) => {
+                https.get('https://api.github.com/repos/ipfs/kubo/releases/latest', {
+                    headers: { 'User-Agent': 'IPFS-Installer' }
+                }, (response) => {
+                    let data = '';
+                    response.on('data', chunk => data += chunk);
+                    response.on('end', () => {
+                        try {
+                            const release = JSON.parse(data);
+                            console.log('Latest version found:', release.tag_name);
+                            resolve(release.tag_name);
+                        } catch (error) {
+                            reject(new Error('Failed to parse version data'));
+                        }
+                    });
+                }).on('error', reject);
+            });
+        } catch (error) {
+            console.error('Error fetching latest version:', error.message);
+            return 'v0.22.0'; // Fallback version
+        }
+    }
+
+    async installWithPackageManager() {
+        try {
+            switch (this.platform) {
+                case 'win32':
+                    console.log('Installing IPFS using winget...');
+                    await execAsync('winget install IPFS.IPFS');
+                    return true;
+                case 'darwin':
+                    console.log('Installing IPFS using Homebrew...');
+                    await execAsync('brew install ipfs');
+                    return true;
+                case 'linux':
+                    console.log('Installing IPFS using apt...');
+                    await execAsync('sudo apt-get update && sudo apt-get install -y ipfs');
+                    return true;
+                default:
+                    return false;
+            }
+        } catch (error) {
+            console.log('Package manager installation failed:', error.message);
+            return false;
+        }
+    }
+
+    async getDownloadUrl() {
+        const version = await this.getLatestVersion();
         let osType, arch;
 
         switch (this.platform) {
@@ -272,10 +322,19 @@ class IPFSInstaller {
             }
 
             console.log('IPFS not found. Starting fresh installation...');
-            const downloadPath = await this.downloadIPFS();
-            await this.extractAndInstall(downloadPath);
-            console.log('Updating system PATH...');
-            await this.updatePath();
+            
+            // Try package manager installation first
+            console.log('Attempting installation via package manager...');
+            const packageManagerSuccess = await this.installWithPackageManager();
+            
+            if (!packageManagerSuccess) {
+                console.log('Package manager installation failed, falling back to manual installation...');
+                const downloadPath = await this.downloadIPFS();
+                await this.extractAndInstall(downloadPath);
+                console.log('Updating system PATH...');
+                await this.updatePath();
+            }
+
             console.log('Initializing IPFS...');
             await this.initializeIPFS();
 
