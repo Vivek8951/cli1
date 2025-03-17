@@ -146,11 +146,25 @@ class IPFSInstaller {
     }
 
     async downloadIPFS() {
-        const url = this.getDownloadUrl();
+        const url = await this.getDownloadUrl();
         const downloadPath = path.join(os.tmpdir(), 'ipfs.tar.gz');
 
         console.log('Starting IPFS download from:', url);
-        console.log('This may take a few minutes depending on your internet connection...');
+        
+        // Get file size first to estimate download time
+        const fileSize = await new Promise((resolve, reject) => {
+            https.get(url, (response) => {
+                resolve(parseInt(response.headers['content-length'], 10));
+            }).on('error', reject);
+        });
+
+        const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+        console.log(`Total download size: ${fileSizeMB} MB`);
+        
+        // Assume average download speed of 1MB/s for estimation
+        const estimatedMinutes = Math.ceil(fileSizeMB / 60);
+        console.log(`Estimated download time: ${estimatedMinutes} minute(s)`);
+        console.log('Starting download...');
         
         return new Promise((resolve, reject) => {
             const file = fs.createWriteStream(downloadPath);
@@ -202,6 +216,7 @@ class IPFSInstaller {
         const extractDir = path.join(os.tmpdir(), 'ipfs-extract');
         console.log('\nStarting IPFS extraction process...');
         console.log('Extraction directory:', extractDir);
+        console.log('Estimated extraction time: 1-2 minutes');
 
         try {
             // Create extract directory
@@ -252,6 +267,14 @@ class IPFSInstaller {
             console.log('Cleanup completed!');
 
             console.log('IPFS installation process completed successfully!');
+            
+            // Verify installation by checking version
+            try {
+                const { stdout: version } = await execAsync('ipfs --version');
+                console.log('\nVerification successful! Installed IPFS version:', version.trim());
+            } catch (error) {
+                console.warn('\nWarning: Could not verify IPFS installation:', error.message);
+            }
         } catch (error) {
             console.error('\nError during IPFS extraction and installation:', error.message);
             if (error.stderr) console.error('Additional error details:', error.stderr);
