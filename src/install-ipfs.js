@@ -65,7 +65,7 @@ class IPFSInstaller {
     }
 
     getDownloadUrl() {
-        const version = 'v0.25.0';
+        const version = 'v0.21.0';
         let osType, arch;
 
         switch (this.platform) {
@@ -73,14 +73,26 @@ class IPFSInstaller {
                 osType = 'windows';
                 break;
             case 'darwin':
-                osType = 'darwin';
+                osType = 'macos';
                 break;
             default:
                 osType = 'linux';
         }
 
-        arch = this.arch === 'x64' ? 'amd64' : this.arch;
-        return `https://dist.ipfs.tech/kubo/${version}/kubo_${version}_${osType}-${arch}.tar.gz`;
+        switch (this.arch) {
+            case 'x64':
+                arch = 'amd64';
+                break;
+            case 'arm64':
+                arch = 'arm64';
+                break;
+            default:
+                arch = '386';
+        }
+
+        const fileName = `kubo_${version}_${osType}-${arch}.tar.gz`;
+        console.log('Generated download filename:', fileName);
+        return `https://dist.ipfs.tech/kubo/${version}/${fileName}`;
     }
 
     async downloadIPFS() {
@@ -115,6 +127,11 @@ class IPFSInstaller {
                     file.close();
                     resolve(downloadPath);
                 });
+
+                file.on('error', (err) => {
+                    fs.unlink(downloadPath, () => {});
+                    reject(new Error(`Error writing to file: ${err.message}`));
+                });
             });
 
             request.on('error', (err) => {
@@ -123,10 +140,10 @@ class IPFSInstaller {
                 reject(new Error(`Failed to download IPFS: ${err.message}`));
             });
 
-            request.setTimeout(30000, () => {
+            request.setTimeout(60000, () => {
                 request.destroy();
                 fs.unlink(downloadPath, () => {});
-                reject(new Error('Download timed out after 30 seconds'));
+                reject(new Error('Download timed out after 60 seconds'));
             });
         });
     }
@@ -154,8 +171,16 @@ class IPFSInstaller {
 
             // Find the ipfs binary in the extracted files
             const ipfsBinary = this.platform === 'win32' ? 'ipfs.exe' : 'ipfs';
-            const extractedBinary = path.join(extractDir, 'kubo', ipfsBinary);
-            console.log('Locating IPFS binary:', ipfsBinary);
+            const kuboDir = fs.readdirSync(extractDir).find(dir => dir.startsWith('kubo'));
+            if (!kuboDir) {
+                throw new Error('Could not find kubo directory in extracted files');
+            }
+            const extractedBinary = path.join(extractDir, kuboDir, ipfsBinary);
+            console.log('Locating IPFS binary:', extractedBinary);
+
+            if (!fs.existsSync(extractedBinary)) {
+                throw new Error(`IPFS binary not found at ${extractedBinary}`);
+            }
 
             // Create destination directory if it doesn't exist
             const destDir = path.dirname(this.ipfsPath);
@@ -186,33 +211,53 @@ class IPFSInstaller {
 
     async updatePath() {
         const binDir = path.dirname(this.ipfsPath);
+        console.log('Updating system PATH to include:', binDir);
 
-        if (this.platform === 'win32') {
-            // Update Windows PATH
-            const userPath = await execAsync('echo %PATH%');
-            if (!userPath.stdout.includes(binDir)) {
-                await execAsync(`setx PATH "%PATH%;${binDir}"`);
-            }
-        } else {
-            // Update Unix-like PATH
-            const shellConfigFile = path.join(this.homeDir, this.platform === 'darwin' ? '.zshrc' : '.bashrc');
-            const pathLine = `\nexport PATH="$PATH:${binDir}"\n`;
+        try {
+            if (this.platform === 'win32') {
+                // Get current user PATH
+                const { stdout: currentPath } = await execAsync('echo %PATH%');
+                if (!currentPath.includes(binDir)) {
+                    console.log('Adding IPFS directory to Windows PATH...');
+                    await execAsync(`setx PATH "%PATH%;${binDir}"`);
+                    console.log('Windows PATH updated successfully!');
+                } else {
+                    console.log('IPFS directory already in Windows PATH');
+                }
+            } else {
+                // Update Unix-like PATH
+                const shellConfigFile = path.join(this.homeDir, this.platform === 'darwin' ? '.zshrc' : '.bashrc');
+                const pathLine = `\nexport PATH="$PATH:${binDir}"\n`;
 
-            if (!fs.existsSync(shellConfigFile) || !fs.readFileSync(shellConfigFile, 'utf8').includes(binDir)) {
-                fs.appendFileSync(shellConfigFile, pathLine);
+                if (!fs.existsSync(shellConfigFile) || !fs.readFileSync(shellConfigFile, 'utf8').includes(binDir)) {
+                    console.log(`Updating PATH in ${shellConfigFile}...`);
+                    fs.appendFileSync(shellConfigFile, pathLine);
+                    console.log('Shell configuration updated successfully!');
+                } else {
+                    console.log('IPFS directory already in PATH configuration');
+                }
             }
+
+            console.log('PATH update completed successfully!');
+        } catch (error) {
+            console.error('Error updating PATH:', error.message);
+            throw error;
         }
-
-        console.log('PATH updated successfully!');
     }
 
+    // Remove duplicate initializeIPFS method and keep the one with better error handling
     async initializeIPFS() {
         try {
-            await execAsync('ipfs init');
+            console.log('Initializing IPFS daemon...');
+            const result = await execAsync('ipfs init');
+            console.log('IPFS initialization output:', result.stdout);
             console.log('IPFS initialized successfully!');
         } catch (error) {
             if (!error.message.includes('already initialized')) {
+                console.error('Error initializing IPFS:', error.message);
                 throw error;
+            } else {
+                console.log('IPFS is already initialized');
             }
         }
     }
