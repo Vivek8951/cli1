@@ -65,7 +65,7 @@ class IPFSInstaller {
     }
 
     getDownloadUrl() {
-        const version = 'v0.22.0';
+        const version = 'v0.25.0';
         let osType, arch;
 
         switch (this.platform) {
